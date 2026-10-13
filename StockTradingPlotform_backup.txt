@@ -1,0 +1,633 @@
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
+import java.awt.*;
+import java.util.*;
+import java.text.DecimalFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
+public class StockTradingPlatform extends JFrame {
+
+    private double cash = 100000.00;
+
+    private final Map<String, String> companies = new LinkedHashMap<>();
+    private final Map<String, Double> prices = new LinkedHashMap<>();
+    private final Map<String, Integer> shares = new LinkedHashMap<>();
+    private final Map<String, Double> averageCost = new LinkedHashMap<>();
+    private final Map<String, java.util.List<Double>> history =
+            new LinkedHashMap<>();
+    private final java.util.List<String> transactions = new ArrayList<>();
+
+    private DefaultTableModel marketModel;
+    private DefaultTableModel portfolioModel;
+    private JTable marketTable;
+    private JLabel cashLabel;
+    private JLabel portfolioLabel;
+    private JLabel profitLabel;
+    private JLabel statusLabel;
+    private ChartPanel chart;
+
+    private final DecimalFormat df = new DecimalFormat("#,##0.00");
+
+    private final Color bg = new Color(13, 20, 36);
+    private final Color panel = new Color(25, 37, 59);
+    private final Color line = new Color(48, 65, 91);
+    private final Color white = new Color(239, 246, 255);
+    private final Color muted = new Color(164, 179, 202);
+    private final Color green = new Color(28, 200, 140);
+    private final Color red = new Color(255, 88, 105);
+    private final Color blue = new Color(67, 126, 255);
+
+    public StockTradingPlatform() {
+        setTitle("CodeAlpha | Stock Trading Platform");
+        setSize(1200, 780);
+        setMinimumSize(new Dimension(950, 650));
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        addStock("TCS", "Tata Consultancy Services", 3850.00);
+        addStock("INFY", "Infosys", 1520.00);
+        addStock("RELIANCE", "Reliance Industries", 1380.00);
+        addStock("HDFCBANK", "HDFC Bank", 1750.00);
+        addStock("WIPRO", "Wipro", 290.00);
+        addStock("ICICIBANK", "ICICI Bank", 1280.00);
+
+        buildUI();
+        refreshAll();
+
+        javax.swing.Timer timer = new javax.swing.Timer(
+                4000, e -> simulateMarket());
+        timer.start();
+    }
+
+    private void addStock(String symbol, String company, double price) {
+        companies.put(symbol, company);
+        prices.put(symbol, price);
+        shares.put(symbol, 0);
+        averageCost.put(symbol, 0.0);
+
+        history.put(symbol, new ArrayList<>(
+                Arrays.asList(
+                        price * 0.985,
+                        price * 0.990,
+                        price * 0.995,
+                        price
+                )
+        ));
+    }
+
+    private void buildUI() {
+        JPanel root = new JPanel(new BorderLayout(0, 14));
+        root.setBackground(bg);
+        root.setBorder(BorderFactory.createEmptyBorder(16, 18, 16, 18));
+        setContentPane(root);
+
+        // Header
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(panel);
+        header.setBorder(BorderFactory.createEmptyBorder(17, 20, 17, 20));
+
+        JPanel heading = new JPanel(new GridLayout(2, 1, 0, 5));
+        heading.setOpaque(false);
+
+        JLabel title = new JLabel("STOCK TRADING PLATFORM");
+        title.setForeground(white);
+        title.setFont(new Font("Segoe UI", Font.BOLD, 24));
+        heading.add(title);
+
+        JLabel subtitle = new JLabel(
+                "SIMULATED MARKET  |  PAPER TRADING");
+        subtitle.setForeground(muted);
+        subtitle.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        heading.add(subtitle);
+
+        cashLabel = new JLabel();
+        cashLabel.setForeground(green);
+        cashLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
+
+        header.add(heading, BorderLayout.WEST);
+        header.add(cashLabel, BorderLayout.EAST);
+        root.add(header, BorderLayout.NORTH);
+
+        // Main content
+        JPanel main = new JPanel(new BorderLayout(0, 12));
+        main.setOpaque(false);
+        root.add(main, BorderLayout.CENTER);
+
+        // Summary cards
+        JPanel metrics = new JPanel(new GridLayout(1, 3, 12, 0));
+        metrics.setOpaque(false);
+
+        portfolioLabel = new JLabel("₹0.00");
+        portfolioLabel.setForeground(white);
+
+        profitLabel = new JLabel("+₹0.00");
+        profitLabel.setForeground(green);
+
+        metrics.add(metric("AVAILABLE CASH", cashLabel));
+        metrics.add(metric("PORTFOLIO MARKET VALUE", portfolioLabel));
+        metrics.add(metric("UNREALIZED PROFIT / LOSS", profitLabel));
+
+        // Market table
+        JPanel marketSection = new JPanel(new BorderLayout(0, 7));
+        marketSection.setOpaque(false);
+        marketSection.add(sectionTitle("MARKET WATCH"), BorderLayout.NORTH);
+
+        marketModel = new DefaultTableModel(
+                new String[]{
+                        "Symbol", "Company", "Price (INR)",
+                        "Change", "Shares Owned"
+                }, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        marketTable = createTable(marketModel);
+        marketTable.setSelectionMode(
+                ListSelectionModel.SINGLE_SELECTION);
+
+        marketTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()
+                    && chart != null
+                    && marketTable.getSelectedRow() >= 0) {
+                int row = marketTable.getSelectedRow();
+                chart.setSymbol(
+                        marketModel.getValueAt(row, 0).toString());
+            }
+        });
+
+        JScrollPane marketScroll = new JScrollPane(marketTable);
+        styleScroll(marketScroll);
+        marketSection.add(marketScroll, BorderLayout.CENTER);
+
+        // Price chart
+        JPanel chartSection = new JPanel(new BorderLayout(0, 7));
+        chartSection.setOpaque(false);
+        chartSection.add(sectionTitle("PRICE MOVEMENT"), BorderLayout.NORTH);
+
+        chart = new ChartPanel();
+        chart.setPreferredSize(new Dimension(290, 230));
+        chartSection.add(chart, BorderLayout.CENTER);
+        chartSection.setPreferredSize(new Dimension(310, 270));
+
+        JPanel upper = new JPanel(new BorderLayout(14, 0));
+        upper.setOpaque(false);
+        upper.add(marketSection, BorderLayout.CENTER);
+        upper.add(chartSection, BorderLayout.EAST);
+
+        // Portfolio table
+        JPanel portfolioSection = new JPanel(new BorderLayout(0, 7));
+        portfolioSection.setOpaque(false);
+        portfolioSection.add(sectionTitle("MY PORTFOLIO"),
+                BorderLayout.NORTH);
+
+        portfolioModel = new DefaultTableModel(
+                new String[]{
+                        "Symbol", "Shares", "Average Cost",
+                        "Current Price", "Market Value", "Profit / Loss"
+                }, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+
+        JTable portfolioTable = createTable(portfolioModel);
+        JScrollPane portfolioScroll = new JScrollPane(portfolioTable);
+        styleScroll(portfolioScroll);
+        portfolioScroll.setPreferredSize(new Dimension(400, 130));
+        portfolioSection.add(portfolioScroll, BorderLayout.CENTER);
+
+        JPanel center = new JPanel(new BorderLayout(0, 12));
+        center.setOpaque(false);
+        center.add(upper, BorderLayout.CENTER);
+        center.add(portfolioSection, BorderLayout.SOUTH);
+
+        JPanel middle = new JPanel(new BorderLayout(0, 12));
+        middle.setOpaque(false);
+        middle.add(metrics, BorderLayout.NORTH);
+        middle.add(center, BorderLayout.CENTER);
+        main.add(middle, BorderLayout.CENTER);
+
+        // Action buttons
+        JPanel footer = new JPanel(new BorderLayout(0, 8));
+        footer.setOpaque(false);
+
+        JPanel buttons = new JPanel(
+                new FlowLayout(FlowLayout.LEFT, 10, 0));
+        buttons.setOpaque(false);
+
+        JButton buyButton = button("Buy Stock", green);
+        JButton sellButton = button("Sell Stock", red);
+        JButton historyButton = button("Transactions", blue);
+        JButton refreshButton = button(
+                "Refresh", new Color(94, 111, 140));
+
+        buyButton.addActionListener(e -> trade(true));
+        sellButton.addActionListener(e -> trade(false));
+        historyButton.addActionListener(e -> showTransactions());
+        refreshButton.addActionListener(e -> refreshAll());
+
+        buttons.add(buyButton);
+        buttons.add(sellButton);
+        buttons.add(historyButton);
+        buttons.add(refreshButton);
+
+        statusLabel = new JLabel("Ready | Prices are simulated");
+        statusLabel.setForeground(muted);
+        statusLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+
+        footer.add(buttons, BorderLayout.NORTH);
+        footer.add(statusLabel, BorderLayout.SOUTH);
+        root.add(footer, BorderLayout.SOUTH);
+    }
+
+    private JPanel metric(String heading, JLabel value) {
+        JPanel card = new JPanel(new BorderLayout(0, 8));
+        card.setBackground(panel);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(line),
+                BorderFactory.createEmptyBorder(12, 14, 12, 14)));
+
+        JLabel label = new JLabel(heading);
+        label.setForeground(muted);
+        label.setFont(new Font("Segoe UI", Font.BOLD, 11));
+
+        value.setFont(new Font("Segoe UI", Font.BOLD, 17));
+
+        card.add(label, BorderLayout.NORTH);
+        card.add(value, BorderLayout.CENTER);
+        return card;
+    }
+
+    private JLabel sectionTitle(String name) {
+        JLabel label = new JLabel(name);
+        label.setForeground(white);
+        label.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        return label;
+    }
+
+    private JTable createTable(DefaultTableModel model) {
+        JTable table = new JTable(model);
+
+        table.setRowHeight(32);
+        table.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        table.setForeground(white);
+        table.setBackground(panel);
+        table.setGridColor(line);
+        table.setSelectionBackground(new Color(51, 76, 112));
+        table.setSelectionForeground(Color.WHITE);
+        table.setShowVerticalLines(false);
+        table.setFillsViewportHeight(true);
+        table.setAutoCreateRowSorter(true);
+
+        JTableHeaderFix.apply(table, panel, line, white);
+
+        return table;
+    }
+
+    private void styleScroll(JScrollPane scroll) {
+        scroll.setBorder(BorderFactory.createLineBorder(line));
+        scroll.getViewport().setBackground(panel);
+        scroll.setBackground(panel);
+    }
+
+    private JButton button(String label, Color color) {
+        JButton b = new JButton(label);
+        b.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        b.setForeground(Color.WHITE);
+        b.setBackground(color);
+        b.setFocusPainted(false);
+        b.setOpaque(true);
+        b.setBorderPainted(false);
+        b.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        b.setPreferredSize(new Dimension(155, 40));
+        return b;
+    }
+
+    private void refreshAll() {
+        if (marketModel == null) {
+            return;
+        }
+
+        marketModel.setRowCount(0);
+
+        for (String symbol : prices.keySet()) {
+            java.util.List<Double> values = history.get(symbol);
+            double first = values.get(0);
+            double current = prices.get(symbol);
+            double change = (current - first) / first * 100.0;
+
+            marketModel.addRow(new Object[]{
+                    symbol,
+                    companies.get(symbol),
+                    "₹" + df.format(current),
+                    String.format(Locale.US, "%+.2f%%", change),
+                    shares.get(symbol)
+            });
+        }
+
+        portfolioModel.setRowCount(0);
+
+        double marketValue = 0;
+        double invested = 0;
+
+        for (String symbol : prices.keySet()) {
+            int quantity = shares.get(symbol);
+
+            if (quantity <= 0) {
+                continue;
+            }
+
+            double currentValue = quantity * prices.get(symbol);
+            double costValue = quantity * averageCost.get(symbol);
+
+            marketValue += currentValue;
+            invested += costValue;
+
+            portfolioModel.addRow(new Object[]{
+                    symbol,
+                    quantity,
+                    "₹" + df.format(averageCost.get(symbol)),
+                    "₹" + df.format(prices.get(symbol)),
+                    "₹" + df.format(currentValue),
+                    (currentValue - costValue >= 0 ? "+" : "-")
+                            + "₹" + df.format(
+                                    Math.abs(currentValue - costValue))
+            });
+        }
+
+        cashLabel.setText("Cash: ₹" + df.format(cash));
+        portfolioLabel.setText("₹" + df.format(marketValue));
+
+        double pnl = marketValue - invested;
+        profitLabel.setText((pnl >= 0 ? "+" : "-")
+                + "₹" + df.format(Math.abs(pnl)));
+        profitLabel.setForeground(pnl >= 0 ? green : red);
+
+        if (chart != null) {
+            chart.repaint();
+        }
+    }
+
+    private void trade(boolean buying) {
+        int row = marketTable.getSelectedRow();
+
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this,
+                    "Please select a stock from Market Watch.");
+            return;
+        }
+
+        // Convert sorted table row to the correct model row.
+        int modelRow = marketTable.convertRowIndexToModel(row);
+        String symbol = marketModel.getValueAt(modelRow, 0).toString();
+        double price = prices.get(symbol);
+
+        String input = JOptionPane.showInputDialog(
+                this,
+                symbol + " | Current price: ₹" + df.format(price)
+                        + "\nAvailable cash: ₹" + df.format(cash)
+                        + "\nEnter the number of shares:",
+                buying ? "Buy Stock" : "Sell Stock",
+                JOptionPane.QUESTION_MESSAGE);
+
+        if (input == null) {
+            return;
+        }
+
+        try {
+            int quantity = Integer.parseInt(input.trim());
+
+            if (quantity <= 0) {
+                throw new NumberFormatException();
+            }
+
+            int owned = shares.get(symbol);
+            double total = price * quantity;
+
+            if (buying) {
+                if (total > cash) {
+                    JOptionPane.showMessageDialog(this,
+                            "Insufficient cash for this purchase.");
+                    return;
+                }
+
+                double oldCost = averageCost.get(symbol) * owned;
+
+                cash -= total;
+                shares.put(symbol, owned + quantity);
+                averageCost.put(symbol,
+                        (oldCost + total) / (owned + quantity));
+
+            } else {
+                if (quantity > owned) {
+                    JOptionPane.showMessageDialog(this,
+                            "You do not own enough shares.");
+                    return;
+                }
+
+                cash += total;
+                shares.put(symbol, owned - quantity);
+
+                if (owned == quantity) {
+                    averageCost.put(symbol, 0.0);
+                }
+            }
+
+            String time = LocalDateTime.now().format(
+                    DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss"));
+
+            transactions.add(time + " | "
+                    + (buying ? "BUY " : "SELL ")
+                    + symbol + " | Quantity: " + quantity
+                    + " | Price: ₹" + df.format(price)
+                    + " | Total: ₹" + df.format(total));
+
+            refreshAll();
+
+            statusLabel.setText((buying ? "Bought " : "Sold ")
+                    + quantity + " shares of " + symbol);
+
+            JOptionPane.showMessageDialog(this,
+                    (buying ? "Purchase" : "Sale") + " successful!\n"
+                            + symbol + " x " + quantity
+                            + "\nTotal: ₹" + df.format(total));
+
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Enter a valid positive whole number.");
+        }
+    }
+
+    private void simulateMarket() {
+        Random random = new Random();
+
+        for (String symbol : prices.keySet()) {
+            double oldPrice = prices.get(symbol);
+            double movement = (random.nextDouble() - 0.48) * 0.018;
+            double newPrice = Math.max(1.0, oldPrice * (1 + movement));
+
+            prices.put(symbol, newPrice);
+
+            java.util.List<Double> values = history.get(symbol);
+            values.add(newPrice);
+
+            if (values.size() > 30) {
+                values.remove(0);
+            }
+        }
+
+        refreshAll();
+    }
+
+    private void showTransactions() {
+        if (transactions.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "No transactions yet. Buy or sell a stock first.",
+                    "Transaction History",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        JTextArea area = new JTextArea(18, 65);
+        area.setEditable(false);
+        area.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        area.setBackground(panel);
+        area.setForeground(white);
+
+        for (String transaction : transactions) {
+            area.append(transaction + "\n\n");
+        }
+
+        area.setCaretPosition(0);
+
+        JScrollPane scroll = new JScrollPane(area);
+        scroll.getViewport().setBackground(panel);
+
+        JOptionPane.showMessageDialog(this, scroll,
+                "Transaction History",
+                JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private class ChartPanel extends JPanel {
+        private String symbol = "TCS";
+
+        ChartPanel() {
+            setBackground(panel);
+            setBorder(BorderFactory.createLineBorder(line));
+        }
+
+        void setSymbol(String symbol) {
+            this.symbol = symbol;
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+
+            int left = 58;
+            int right = getWidth() - 14;
+            int top = 32;
+            int bottom = getHeight() - 35;
+
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            g2.setColor(muted);
+            g2.drawString(symbol + " price", 12, 18);
+
+            java.util.List<Double> values = history.get(symbol);
+
+            if (values == null || values.size() < 2
+                    || right <= left || bottom <= top) {
+                g2.dispose();
+                return;
+            }
+
+            double min = Collections.min(values);
+            double max = Collections.max(values);
+            double range = Math.max(0.01, max - min);
+
+            for (int i = 0; i < 4; i++) {
+                int y = top + i * (bottom - top) / 3;
+                g2.setColor(line);
+                g2.drawLine(left, y, right, y);
+            }
+
+            g2.setColor(white);
+            g2.drawString("₹" + df.format(max), 4, top + 4);
+            g2.drawString("₹" + df.format(min), 4, bottom + 4);
+
+            g2.setColor(green);
+            g2.setStroke(new BasicStroke(2.2f));
+
+            int previousX = left;
+            int previousY = bottom - (int) (
+                    (values.get(0) - min) / range * (bottom - top));
+
+            for (int i = 1; i < values.size(); i++) {
+                int x = left + i * (right - left)
+                        / (values.size() - 1);
+
+                int y = bottom - (int) (
+                        (values.get(i) - min) / range * (bottom - top));
+
+                g2.drawLine(previousX, previousY, x, y);
+
+                previousX = x;
+                previousY = y;
+            }
+
+            g2.dispose();
+        }
+    }
+
+    // Ensures table column headings remain readable.
+    private static class JTableHeaderFix {
+        static void apply(JTable table, Color background,
+                          Color borderColor, Color foreground) {
+            table.getTableHeader().setFont(
+                    new Font("Segoe UI", Font.BOLD, 12));
+            table.getTableHeader().setBackground(background);
+            table.getTableHeader().setForeground(foreground);
+            table.getTableHeader().setOpaque(true);
+            table.getTableHeader().setPreferredSize(
+                    new Dimension(0, 36));
+
+            DefaultTableCellRenderer renderer =
+                    new DefaultTableCellRenderer();
+
+            renderer.setBackground(new Color(43, 59, 84));
+            renderer.setForeground(foreground);
+            renderer.setOpaque(true);
+            renderer.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            renderer.setBorder(BorderFactory.createMatteBorder(
+                    0, 0, 1, 1, borderColor));
+
+            for (int i = 0; i < table.getColumnCount(); i++) {
+                table.getColumnModel().getColumn(i)
+                        .setHeaderRenderer(renderer);
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                UIManager.setLookAndFeel(
+                        UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception ignored) {
+                // Continue with Java's default appearance.
+            }
+
+            new StockTradingPlatform().setVisible(true);
+        });
+    }
+}
